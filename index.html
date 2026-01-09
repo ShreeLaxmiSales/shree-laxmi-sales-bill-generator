@@ -226,16 +226,30 @@ function generateBills(){
             billTotal+=amt;
         }
 
-        let diff=billTargets[idx]-billTotal;
-        if(diff>0){
-            let last=rows[rows.length-1];
-            let addQty=Math.round(diff/last.rate);
-            if(addQty>0){
-                last.qty+=addQty;
-                last.amt=last.qty*last.rate;
-                billTotal+=addQty*last.rate;
-            }
+        let diff = billTargets[idx] - billTotal;
+        
+        if (diff > 0) {
+            for (let r of rows) {
+                if (diff <= 0) break;
+                // max qty allowed for this item
+                let [qMin, qMax] = qtyLimits[r.item];
+                // can we increase this row safely?
+                if (r.qty < qMax) {
+                    let addQty = Math.min(
+                        qMax - r.qty,
+                        Math.ceil(diff / r.rate),
+                        2 // 🔒 small natural increment
+                        );
+                    r.qty += addQty;
+                    r.amt = r.qty * r.rate;
+                    diff -= addQty * r.rate;
+                    billTotal += addQty * r.rate;
         }
+    }
+}
+
+
+
 
         generatedBills.push({
             date,name,place,rows,billTotal,inv:invoiceCounter++
@@ -333,3 +347,4 @@ function downloadPDF(){
 
 </body>
 </html>
+
