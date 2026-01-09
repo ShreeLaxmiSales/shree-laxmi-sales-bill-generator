@@ -160,19 +160,47 @@ rows.push({item,qty,rate,amt});
 billTotal+=amt;
 }
 
-let diff=billTargets[idx]-billTotal;
-if(diff>0){
-for(let r of rows){
-if(diff<=0)break;
-let[qMin,qMax]=qtyLimits[r.item];
-if(r.qty<qMax){
-let addQty=Math.min(qMax-r.qty,Math.ceil(diff/r.rate),2);
-r.qty+=addQty;
-r.amt=r.qty*r.rate;
-billTotal+=addQty*r.rate;
-diff-=addQty*r.rate;
-}}
+let diff = billTargets[idx] - billTotal;
+if (diff > 0) {
+    // 1️⃣ First pass: give everyone a base increase
+    for (let r of rows) {
+        if (diff <= 0) break;
+
+        let [qMin, qMax] = qtyLimits[r.item];
+
+        // base increase (medium)
+        let baseInc = rand(2, 4);
+
+        let addQty = Math.min(qMax - r.qty, baseInc);
+        if (addQty <= 0) continue;
+
+        r.qty += addQty;
+        r.amt = r.qty * r.rate;
+        diff -= addQty * r.rate;
+        billTotal += addQty * r.rate;
+    }
+
+    // 2️⃣ Second pass: add extra to some rows (high)
+    for (let r of rows) {
+        if (diff <= 0) break;
+
+        let [qMin, qMax] = qtyLimits[r.item];
+
+        // extra boost only to some items
+        if (Math.random() < 0.6) {
+            let extraInc = rand(1, 3);
+            let addQty = Math.min(qMax - r.qty, extraInc);
+
+            if (addQty <= 0) continue;
+
+            r.qty += addQty;
+            r.amt = r.qty * r.rate;
+            diff -= addQty * r.rate;
+            billTotal += addQty * r.rate;
+        }
+    }
 }
+
 
 monthlyRunningTotal+=billTotal;
 generatedBills.push({date,name,place,rows,billTotal,inv:invoiceCounter++});
@@ -249,3 +277,4 @@ pdf.save(fileName);
 
 </body>
 </html>
+
