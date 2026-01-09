@@ -12,28 +12,23 @@ body{
 }
 h1{text-align:center;margin-bottom:4px;}
 h2{text-align:center;color:#666;margin-top:0;}
-
 .controls{text-align:center;margin:20px 0;}
 select,button{padding:8px 14px;font-size:14px;margin:5px;}
 button{
-    background:#2c3e50;color:#fff;border:none;border-radius:6px;cursor:pointer;
+    background:#2c3e50;color:white;border:none;
+    border-radius:6px;cursor:pointer;
 }
 button:hover{background:#1f2d3a;}
-
 .bill{
-    background:#fff;margin:20px 0;padding:15px;border-radius:8px;
-    box-shadow:0 2px 6px rgba(0,0,0,.08);
+    background:white;margin:20px 0;padding:15px;
+    border-radius:8px;box-shadow:0 2px 6px rgba(0,0,0,.08);
 }
 .bill-header{
-    display:flex;justify-content:space-between;flex-wrap:wrap;
-    font-size:14px;margin-bottom:8px;
+    display:flex;justify-content:space-between;
+    flex-wrap:wrap;font-size:14px;margin-bottom:8px;
 }
-table{
-    width:100%;border-collapse:collapse;margin-top:10px;
-}
-th,td{
-    border:1px solid #333;padding:6px;text-align:center;
-}
+table{width:100%;border-collapse:collapse;margin-top:10px;}
+th,td{border:1px solid #333;padding:6px;text-align:center;}
 th{background:#f0f0f0;}
 .totals{text-align:right;margin-top:10px;font-size:14px;}
 </style>
@@ -55,8 +50,7 @@ th{background:#f0f0f0;}
 </select>
 
 <select id="year">
-<option selected>2025</option><option>2026</option><option>2027</option>
-<option>2028</option><option>2029</option><option>2030</option>
+<option selected>2025</option><option>2026</option>
 </select>
 
 <br><br>
@@ -71,25 +65,29 @@ th{background:#f0f0f0;}
 
 <script>
 const { jsPDF } = window.jspdf;
+const output = document.getElementById("output");
 const HSN="7117";
+const GLOBAL_MAX_QTY=300;
 
 /* Rates */
 const itemRates={
-Set:[165,175,190],
-Chain:[12,15,20,35,80],
+Chain:[12,15,20,35],
 Pendal:[15,20,25,30],
-Mangalsutra:[20,25,30,35],
+Mangalsutra:[20,25,30],
 Kanthi:[30,35,40],
-Ring:[40,45,50]
+Ring:[40,45,50],
+Set:[165,175,190]
 };
 
-/* Qty limits */
 const qtyLimits={
-Set:[1,3],Chain:[3,20],Pendal:[3,25],
-Mangalsutra:[2,15],Kanthi:[2,12],Ring:[5,30]
+Chain:[40,300],
+Pendal:[40,300],
+Mangalsutra:[20,200],
+Kanthi:[20,200],
+Ring:[40,300],
+Set:[5,60]
 };
 
-/* Name → Place */
 const namePlace={
 Abhay:"Delhi",Vijay:"Delhi","Raj Kumar":"Delhi",Sonu:"Delhi",
 Tushar:"Delhi",Naveen:"Delhi","R.S":"Agra",
@@ -102,11 +100,7 @@ let generatedBills=[],invoiceCounter=1;
 function rand(a,b){return Math.floor(Math.random()*(b-a+1))+a;}
 function pick(a){return a[rand(0,a.length-1)];}
 function isSunday(d){return d.getDay()===0;}
-
-function adjustRateQty(rate,qty){
-if(rate>20){rate=Math.round(rate/2.5);qty*=2;}
-return{rate,qty};
-}
+function recalc(rows){return rows.reduce((s,r)=>s+r.qty*r.rate,0);}
 
 function randomDates(y,m,c){
 let d=[],days=new Date(y,m+1,0).getDate();
@@ -117,15 +111,36 @@ if(!isSunday(x)&&!d.some(z=>z.toDateString()==x.toDateString()))d.push(x);
 return d.sort((a,b)=>a-b);
 }
 
-function splitMonthlyTarget(total,parts){
-let arr=[],rem=total;
-for(let i=0;i<parts-1;i++){
-let avg=rem/(parts-i);
-let v=Math.round(rand(avg*0.9,avg*1.1)/100)*100;
-arr.push(v);rem-=v;
+function normalizeBill(rows, minBill, maxBill) {
+    let total = recalc(rows);
+
+    // Reduce if too high
+    while (total > maxBill) {
+        for (let r of rows) {
+            if (r.qty > 1) {
+                r.qty -= 1;
+                r.amt = r.qty * r.rate;
+                total = recalc(rows);
+                if (total <= maxBill) break;
+            }
+        }
+    }
+
+    // Increase if too low
+    while (total < minBill) {
+        for (let r of rows) {
+            if (r.qty < GLOBAL_MAX_QTY) {
+                r.qty += 1;
+                r.amt = r.qty * r.rate;
+                total = recalc(rows);
+                if (total >= minBill) break;
+            }
+        }
+    }
+
+    return total;
 }
-arr.push(rem);return arr;
-}
+
 
 function generateBills(){
 output.innerHTML="";
@@ -134,17 +149,20 @@ generatedBills=[];invoiceCounter=1;
 const m=parseInt(month.value),y=parseInt(year.value);
 const billCount=rand(4,5);
 const dates=randomDates(y,m,billCount);
-const monthlyTarget=rand(43000,45000);
-const billTargets=splitMonthlyTarget(monthlyTarget,billCount);
 
-let monthlyRunningTotal=0;
+let minBill=billCount===4?10000:8000;
+let maxBill=billCount===4?11000:9000;
 
-dates.forEach((date,idx)=>{
-let rows=[],billTotal=0,usedRates=new Set();
-const name=pick(Object.keys(namePlace));
-const place=namePlace[name];
+dates.forEach(date=>{
+let rows=[],usedRates=new Set();
+let billTarget=rand(minBill,maxBill);
+let name=pick(Object.keys(namePlace));
+let place=namePlace[name];
 
-while(rows.length<rand(5,6)){
+// fixed 5–6 items
+let itemCount=rand(5,6);
+
+for(let i=0;i<itemCount;i++){
 let item=pick(Object.keys(itemRates));
 let rate=pick(itemRates[item]);
 if(usedRates.has(rate))continue;
@@ -152,78 +170,36 @@ usedRates.add(rate);
 
 let[q1,q2]=qtyLimits[item];
 let qty=rand(q1,q2);
-({rate,qty}=adjustRateQty(rate,qty));
+qty=Math.min(qty,GLOBAL_MAX_QTY);
 
-let amt=rate*qty;
-if(billTotal+amt>billTargets[idx]*1.05)continue;
-rows.push({item,qty,rate,amt});
-billTotal+=amt;
+rows.push({item,qty,rate,amt:qty*rate});
 }
 
-let diff = billTargets[idx] - billTotal;
-if (diff > 0) {
-    // 1️⃣ First pass: give everyone a base increase
-    for (let r of rows) {
-        if (diff <= 0) break;
+let billTotal=recalc(rows);
 
-        let [qMin, qMax] = qtyLimits[r.item];
-
-        // base increase (medium)
-        let baseInc = rand(2, 4);
-
-        let addQty = Math.min(qMax - r.qty, baseInc);
-        if (addQty <= 0) continue;
-
-        r.qty += addQty;
-        r.amt = r.qty * r.rate;
-        diff -= addQty * r.rate;
-        billTotal += addQty * r.rate;
-    }
-
-    // 2️⃣ Second pass: add extra to some rows (high)
-    for (let r of rows) {
-        if (diff <= 0) break;
-
-        let [qMin, qMax] = qtyLimits[r.item];
-
-        // extra boost only to some items
-        if (Math.random() < 0.6) {
-            let extraInc = rand(1, 3);
-            let addQty = Math.min(qMax - r.qty, extraInc);
-
-            if (addQty <= 0) continue;
-
-            r.qty += addQty;
-            r.amt = r.qty * r.rate;
-            diff -= addQty * r.rate;
-            billTotal += addQty * r.rate;
-        }
-    }
-}
-
-
-monthlyRunningTotal+=billTotal;
-generatedBills.push({date,name,place,rows,billTotal,inv:invoiceCounter++});
-});
-
-/* 🔒 MONTH-LEVEL FINAL BALANCE */
-let monthDiff=monthlyTarget-monthlyRunningTotal;
-if(monthDiff>0){
-let last=generatedBills[generatedBills.length-1];
-for(let r of last.rows){
-if(monthDiff<=0)break;
-let[qMin,qMax]=qtyLimits[r.item];
-if(r.qty<qMax){
-let addQty=Math.min(qMax-r.qty,Math.ceil(monthDiff/r.rate),2);
+// fine tuning
+let diff=billTarget-billTotal;
+if(diff>0){
+for(let r of rows){
+if(diff<=0)break;
+let addQty=Math.min(3,GLOBAL_MAX_QTY-r.qty);
 r.qty+=addQty;
 r.amt=r.qty*r.rate;
-monthDiff-=addQty*r.rate;
-last.billTotal+=addQty*r.rate;
-}}
+diff-=addQty*r.rate;
+}
 }
 
-/* Render */
+billTotal = normalizeBill(rows, minBill, maxBill);
+
+generatedBills.push({
+date,name,place,rows,billTotal,inv:invoiceCounter++
+});
+});
+
+// render
+let monthlySum=0;
 generatedBills.forEach(b=>{
+monthlySum+=b.billTotal;
 let igst=(b.billTotal*0.03).toFixed(2);
 let total=(b.billTotal*1.03).toFixed(2);
 output.innerHTML+=`
@@ -236,7 +212,11 @@ output.innerHTML+=`
 </div>
 <table>
 <tr><th>Sr</th><th>Description</th><th>HSN</th><th>Qty</th><th>Rate</th><th>Amount</th></tr>
-${b.rows.map((r,i)=>`<tr><td>${i+1}</td><td>${r.item}</td><td>${HSN}</td><td>${r.qty}</td><td>${r.rate}</td><td>${r.amt}</td></tr>`).join("")}
+${b.rows.map((r,i)=>`
+<tr>
+<td>${i+1}</td><td>${r.item}</td><td>${HSN}</td>
+<td>${r.qty}</td><td>${r.rate}</td><td>${r.amt}</td>
+</tr>`).join("")}
 </table>
 <div class="totals">
 Total before GST ₹${b.billTotal}<br>
@@ -246,10 +226,14 @@ IGST 3% ₹${igst}<br>
 </div>`;
 });
 
-output.innerHTML+=`<h3 style="text-align:right;color:green">Monthly Total: ₹${monthlyTarget}</h3>`;
+output.innerHTML+=`<h3 style="text-align:right;color:green">
+Monthly Total: ₹${monthlySum}
+</h3>`;
 }
 
-function getMonthCode(m){return["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"][m];}
+function getMonthCode(m){
+return["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"][m];
+}
 
 function downloadPDF(){
 const pdf=new jsPDF("p","mm","a4");
@@ -270,11 +254,9 @@ pdf.text(`Total before GST : ₹ ${b.billTotal.toFixed(2)}`,20,y);
 pdf.text(`IGST @3%        : ₹ ${(b.billTotal*0.03).toFixed(2)}`,20,y+8);
 pdf.text(`Total Amount    : ₹ ${(b.billTotal*1.03).toFixed(2)}`,20,y+16);
 });
-const fileName=`SLS_${getMonthCode(parseInt(month.value))}_${year.value}_Bill.pdf`;
-pdf.save(fileName);
+pdf.save(`SLS_${getMonthCode(parseInt(month.value))}_${year.value}_Bill.pdf`);
 }
 </script>
 
 </body>
 </html>
-
